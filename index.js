@@ -1,53 +1,32 @@
 const onHeaders = require('on-headers');
+const { makeTimings } = require('./lib/timings');
 
-const start = timings => key => {
-  timings[key] = {
-    start: process.hrtime(),
-  };
+module.exports = serverTimings;
 
-  return timings[key].start;
-};
+function serverTimings(_req, res, next) {
+  const tms = makeTimings();
+  tms.start('total');
 
-const end = timings => key => {
-  if (!timings[key] || !timings[key].start) {
-    return;
-  }
+  res.locals ??= {};
+  res.locals.timings = tms;
 
-  timings[key].end = process.hrtime(timings[key].start);
-  timings[key].delta = (timings[key].end[1]/1000000).toFixed(2);
-
-  return timings[key].delta;
+  onHeaders(res, () => res.appendHeader('Server-Timing', tms.header()));
+  next();
 }
 
-module.exports = (req, res, next) => {
-  const timings = {};
+serverTimings.start = start;
+serverTimings.end = end;
 
-  res.locals.timings = {
-    start: start(timings),
-    end: end(timings),
+function start(...args) {
+  return function (_req, res, next) {
+    res.locals?.timings?.start(...args);
+    next();
   };
+}
 
-  res.locals.timings.start('Request');
-
-  onHeaders(res, () => {
-    const existingHeaders = res.getHeader('Server-Timing');
-    const mapping = [].concat(existingHeaders || []).concat(Object.keys(timings).map((key, i) => {
-      const delta = timings[key].delta || end(timings)(key);
-      return `${i}; dur=${delta}; desc="${key}"`
-    }).join(', '));
-
-    res.setHeader('Server-Timing', mapping);
-  });
-
-  next();
-};
-
-module.exports.start = opts => (req, res, next) => {
-  res.locals.timings.start(opts);
-  next();
-};
-
-module.exports.end = opts => (req, res, next) => {
-  res.locals.timings.end(opts);
-  next();
-};
+function end(...args) {
+  return function (_req, res, next) {
+    res.locals?.timings?.end(...args);
+    next();
+  };
+}
